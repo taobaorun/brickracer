@@ -137,10 +137,16 @@ export const MAX_BRICKS = 120;
 export const MAX_INSTANCE_ID_LENGTH = 64;
 export const CHASSIS_BASE_MASS = 40;
 
-/** 车轮等保留区域：车轮舱格位不允许普通积木占据。 */
-export const RESERVED_WHEEL_CELLS: ReadonlyArray<{ x: number; y: number; z: number }> = [
-  { x: -3, y: 1, z: -2 },
-  { x: 3, y: 1, z: -2 },
-  { x: -3, y: 1, z: 2 },
-  { x: 3, y: 1, z: 2 },
-] as const;
+/**
+ * 车轮保留区域：两侧轮拱列（x=±3）的底层（y=1）整列不允许普通积木占据，
+ * 与车轮真实视觉/物理包络一致（车轮中心 |x|≈1.6、半径 0.35，顶层 y≥2 不受限）。
+ */
+export const RESERVED_WHEEL_CELLS: ReadonlyArray<{ x: number; y: number; z: number }> = (() => {
+  const cells: Array<{ x: number; y: number; z: number }> = [];
+  for (const x of [-3, 3]) {
+    for (let z = BUILD_BOUNDS.minZ; z <= BUILD_BOUNDS.maxZ; z += 1) {
+      cells.push({ x, y: 1, z });
+    }
+  }
+  return cells;
+})();

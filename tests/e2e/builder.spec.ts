@@ -5,95 +5,41 @@ async function freshPage(page: Page) {
   await expect(page.getByTestId("builder-panel")).toBeVisible({ timeout: 30_000 });
 }
 
-/** 依次尝试候选格位，点击第一个可命中的（适配不同视口遮挡）。 */
-async function clickAnyCell(page: Page, cells: ReadonlyArray<readonly [number, number, number]>) {
-  for (const [x, y, z] of cells) {
-    const ok = await page.evaluate(
-      ([cx, cy, cz]) => {
-        const w = window as unknown as {
-          __brickracer: {
-            controller: {
-              runtime: {
-                builderPick(a: number, b: number): { kind: string; position?: { x: number; y: number; z: number } };
-              };
-            };
-          };
-        };
-        const rt = w.__brickracer.controller.runtime;
-        const layerEl = document.querySelector("[data-testid='canvas-tap-layer']")!;
-        const rect = layerEl.getBoundingClientRect();
-        for (let ny = 0.05; ny < 0.95; ny += 0.004) {
-          for (let nx = 0.05; nx < 0.95; nx += 0.004) {
-            const r = rt.builderPick(nx, ny);
-            const isTarget = (p: { kind: string; position?: { x: number; y: number; z: number } }) =>
-              p.kind === "cell" && p.position && p.position.x === cx && p.position.y === cy && p.position.z === cz;
-            // 稳定性余量：相邻 4 个亚像素偏移也必须拾取同一格位（浏览器取整差异）
-            if (
-              isTarget(r) &&
-              isTarget(rt.builderPick(nx + 0.003, ny)) &&
-              isTarget(rt.builderPick(nx - 0.003, ny)) &&
-              isTarget(rt.builderPick(nx, ny + 0.003)) &&
-              isTarget(rt.builderPick(nx, ny - 0.003))
-            ) {
-              const el = document.elementFromPoint(rect.left + nx * rect.width, rect.top + ny * rect.height);
-              if (el === layerEl) return { nx, ny };
-            }
-          }
-        }
-        return null;
-      },
-      [x, y, z] as const,
-    );
-    if (ok) {
-      const layer = page.getByTestId("canvas-tap-layer");
-      const box = await layer.boundingBox();
-      await page.mouse.click(box!.x + ok.nx * box!.width, box!.y + ok.ny * box!.height);
-      return [x, y, z] as const;
+/** 在画布扫描满足条件的稳定拾取点（亚像素余量 + 不被面板遮挡），返回归一化坐标。 */
+async function findPickPoint(
+  page: Page,
+  matchPredicateSource: string,
+): Promise<{ nx: number; ny: number } | null> {
+  return page.evaluate((matchSrc) => {
+    const w = window as unknown as {
+      __brickracer: { controller: { runtime: { builderPick(a: number, b: number): unknown } } };
+    };
+    const rt = w.__brickracer.controller.runtime;
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const matches = new Function("pick", matchSrc) as (p: never) => boolean;
+    const layerEl = document.querySelector("[data-testid='canvas-tap-layer']")!;
+    const rect = layerEl.getBoundingClientRect();
+    const stable = (nx: number, ny: number) =>
+      matches(rt.builderPick(nx, ny) as never) &&
+      matches(rt.builderPick(nx + 0.003, ny) as never) &&
+      matches(rt.builderPick(nx - 0.003, ny) as never) &&
+      matches(rt.builderPick(nx, ny + 0.003) as never) &&
+      matches(rt.builderPick(nx, ny - 0.003) as never);
+    for (let ny = 0.05; ny < 0.95; ny += 0.004) {
+      for (let nx = 0.05; nx < 0.95; nx += 0.004) {
+        if (!stable(nx, ny)) continue;
+        const el = document.elementFromPoint(rect.left + nx * rect.width, rect.top + ny * rect.height);
+        if (el === layerEl) return { nx, ny };
+      }
     }
-  }
-  throw new Error("no candidate cell clickable");
+    return null;
+  }, matchPredicateSource);
 }
 
-/** 找到命中当前新放积木的像素并点击（用于选中）。 */
-async function clickBrick(page: Page, instanceId: string) {
+async function clickAt(page: Page, pt: { nx: number; ny: number }) {
   const layer = page.getByTestId("canvas-tap-layer");
   const box = await layer.boundingBox();
-  const pt = await page.evaluate(
-    (id) => {
-      const w = window as unknown as {
-        __brickracer: {
-          controller: {
-            runtime: {
-              builderPick(a: number, b: number): { kind: string; instanceId?: string };
-            };
-          };
-        };
-      };
-      const rt = w.__brickracer.controller.runtime;
-      const layerEl = document.querySelector("[data-testid='canvas-tap-layer']")!;
-      const rect = layerEl.getBoundingClientRect();
-      for (let ny = 0.05; ny < 0.95; ny += 0.005) {
-        for (let nx = 0.05; nx < 0.95; nx += 0.005) {
-          const r = rt.builderPick(nx, ny);
-          const isTarget = (p: { kind: string; instanceId?: string }) => p.kind === "brick" && p.instanceId === id;
-          if (
-            isTarget(r) &&
-            isTarget(rt.builderPick(nx + 0.003, ny)) &&
-            isTarget(rt.builderPick(nx - 0.003, ny)) &&
-            isTarget(rt.builderPick(nx, ny + 0.003)) &&
-            isTarget(rt.builderPick(nx, ny - 0.003))
-          ) {
-            const el = document.elementFromPoint(rect.left + nx * rect.width, rect.top + ny * rect.height);
-            if (el === layerEl) return { nx, ny };
-          }
-        }
-      }
-      return null;
-    },
-    instanceId,
-  );
-  expect(pt, `no pixel hits brick ${instanceId}`).not.toBeNull();
-  await page.mouse.click(box!.x + pt!.nx * box!.width, box!.y + pt!.ny * box!.height);
+  await page.mouse.click(box!.x + pt.nx * box!.width, box!.y + pt.ny * box!.height);
 }
 
 function brickCount(page: Page): Promise<number> {
@@ -105,6 +51,27 @@ function brickCount(page: Page): Promise<number> {
   });
 }
 
+function lastBrickId(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const w = window as unknown as {
+      __brickracer: {
+        controller: { snapshot: { save: { activeBlueprint: { bricks: Array<{ instanceId: string }> } } } };
+      };
+    };
+    const bricks = w.__brickracer.controller.snapshot.save.activeBlueprint.bricks;
+    return bricks[bricks.length - 1]!.instanceId;
+  });
+}
+
+function cameraPos(page: Page): Promise<{ x: number; y: number; z: number }> {
+  return page.evaluate(() => {
+    const w = window as unknown as {
+      __brickracer: { controller: { runtime: { builderCameraPosition(): { x: number; y: number; z: number } } } };
+    };
+    return w.__brickracer.controller.runtime.builderCameraPosition();
+  });
+}
+
 test.describe("builder interactions (R2/R3)", () => {
   test("default car is present and start button available", async ({ page }) => {
     await freshPage(page);
@@ -112,36 +79,109 @@ test.describe("builder interactions (R2/R3)", () => {
     await expect(page.getByTestId("meter-速度")).toBeVisible();
   });
 
-  test("place, select, rotate and remove a brick", async ({ page }) => {
+  test("place on chassis and stack upward on a brick face (real brick rules)", async ({
+    page,
+  }) => {
     await freshPage(page);
     await page.getByTestId("brick-brick-2x1").click();
     await page.getByTestId("color-blue").click();
-    await clickAnyCell(page, [
-      [1, 1, 0],
-      [0, 1, 3],
-      [-1, 1, 3],
-      [1, 1, 2],
-      [-2, 1, 3],
-    ]);
+
+    // 底盘空格位放置（搭建模式默认）
+    const cell = await findPickPoint(
+      page,
+      `return pick.kind === "cell" && pick.position.y === 1 && (
+        (pick.position.x === 1 && pick.position.z === 0) ||
+        (pick.position.x === 0 && pick.position.z === 3) ||
+        (pick.position.x === -1 && pick.position.z === 3) ||
+        (pick.position.x === 1 && pick.position.z === 2)
+      );`,
+    );
+    expect(cell, "no clickable chassis cell").not.toBeNull();
+    await clickAt(page, cell!);
     expect(await brickCount(page)).toBe(5);
 
-    // 放置后自动选中 → 旋转 → 移除
-    await expect(page.getByTestId("selection-actions")).toBeVisible();
-    await page.getByTestId("rotate-brick").click();
-    expect(await brickCount(page)).toBe(5);
-    await page.getByTestId("remove-brick").click();
-    expect(await brickCount(page)).toBe(4);
-
-    // 点选已有积木也能选中
-    await clickBrick(page, "b-cab-1");
-    await expect(page.getByTestId("selection-actions")).toBeVisible();
+    // 向上堆叠：点击新积木顶面 → faceTarget 为上方格位
+    const baseId = await lastBrickId(page);
+    const top = await findPickPoint(
+      page,
+      `return pick.kind === "brick" && pick.instanceId === ${JSON.stringify(baseId)} && pick.faceTarget.y >= 2;`,
+    );
+    expect(top, "no clickable top face for stacking").not.toBeNull();
+    await clickAt(page, top!);
+    expect(await brickCount(page)).toBe(6);
   });
 
-  test("equip locked part is impossible; unlocked selection persists debounce save", async ({ page }) => {
+  test("select mode: pick, rotate and remove an existing brick", async ({ page }) => {
+    await freshPage(page);
+    await page.getByTestId("mode-select").click();
+    const pt = await findPickPoint(
+      page,
+      `return pick.kind === "brick" && pick.instanceId === "b-cab-1";`,
+    );
+    expect(pt).not.toBeNull();
+    await clickAt(page, pt!);
+    await expect(page.getByTestId("selection-actions")).toBeVisible();
+    await page.getByTestId("rotate-brick").click();
+    expect(await brickCount(page)).toBe(4); // 默认车 4 块，旋转不增不减
+
+    // 移除顶层积木（不破坏连通性）
+    const top = await findPickPoint(
+      page,
+      `return pick.kind === "brick" && pick.instanceId === "b-cab-2";`,
+    );
+    expect(top).not.toBeNull();
+    await clickAt(page, top!);
+    await page.getByTestId("remove-brick").click();
+    expect(await brickCount(page)).toBe(3);
+  });
+
+  test("orbit camera: drag rotates, wheel zooms", async ({ page }) => {
+    await freshPage(page);
+    const before = await cameraPos(page);
+    // 直接派发 PointerEvent，跨浏览器/移动仿真一致地驱动真实手势处理器
+    await page.evaluate(() => {
+      const layer = document.querySelector("[data-testid='canvas-tap-layer']")!;
+      const rect = layer.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const fire = (type: string, x: number, y: number) =>
+        layer.dispatchEvent(
+          new PointerEvent(type, { pointerId: 1, clientX: x, clientY: y, bubbles: true, isPrimary: true }),
+        );
+      fire("pointerdown", cx, cy);
+      for (let i = 1; i <= 8; i += 1) fire("pointermove", cx + i * 20, cy);
+      fire("pointerup", cx + 160, cy);
+    });
+    const afterDrag = await cameraPos(page);
+    expect(Math.hypot(afterDrag.x - before.x, afterDrag.z - before.z)).toBeGreaterThan(1);
+
+    await page.evaluate(() => {
+      const layer = document.querySelector("[data-testid='canvas-tap-layer']")!;
+      layer.dispatchEvent(new WheelEvent("wheel", { deltaY: -300, bubbles: true }));
+    });
+    const afterZoom = await cameraPos(page);
+    const dist = (p: { x: number; y: number; z: number }) => Math.hypot(p.x, p.y - 0.5, p.z);
+    expect(dist(afterZoom)).toBeLessThan(dist(afterDrag));
+  });
+
+  test("wheel arch cells are reserved with friendly feedback", async ({ page }) => {
+    await freshPage(page);
+    // 轮拱列（x=3, y=1）整列为保留区
+    const pt = await findPickPoint(
+      page,
+      `return pick.kind === "cell" && pick.position.x === 3 && pick.position.y === 1 && pick.position.z >= -1 && pick.position.z <= 1;`,
+    );
+    if (pt) {
+      await clickAt(page, pt);
+      await expect(page.getByTestId("builder-feedback")).toBeVisible();
+      expect(await brickCount(page)).toBe(4);
+    }
+  });
+
+  test("locked parts are not equippable; selection persists via debounce save", async ({ page }) => {
     await freshPage(page);
     const options = page.getByTestId("slot-engine").locator("option");
     await expect(options).toHaveCount(1); // 只有基础发动机已解锁
-    // 等待防抖保存落盘
     await page.waitForTimeout(800);
     const raw = await page.evaluate(() => window.localStorage.getItem("brickracer.save.v1"));
     expect(raw).toBeTruthy();

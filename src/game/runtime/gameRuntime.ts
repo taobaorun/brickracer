@@ -147,8 +147,16 @@ export class GameRuntime {
     return this.builderScene?.pick(nx, ny) ?? { kind: "none" };
   }
 
-  builderProjectCell(x: number, y: number, z: number): { nx: number; ny: number } | null {
-    return this.builderScene?.projectCell(x, y, z) ?? null;
+  builderOrbit(deltaAzimuth: number, deltaPolar: number): void {
+    this.builderScene?.orbit(deltaAzimuth, deltaPolar);
+  }
+
+  builderZoom(factor: number): void {
+    this.builderScene?.zoom(factor);
+  }
+
+  builderCameraPosition(): { x: number; y: number; z: number } | null {
+    return this.builderScene?.cameraPosition() ?? null;
   }
 
   builderSelect(instanceId: string | null): void {

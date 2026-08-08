@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { AppController } from "../app/AppController";
 import type { AppSnapshot } from "../app/state";
 import { AERO_PARTS, BRICK_TYPES, BUMPER_PARTS, COLORS, ENGINES, WHEEL_SETS } from "../content/catalog";
@@ -23,6 +23,9 @@ function nextId(): string {
   return `ui-${Date.now()}-${idCounter}`;
 }
 
+type BuilderMode = "build" | "select";
+const TAP_MAX_MS = 500;
+
 export function BuilderPanel({
   controller,
   snapshot,
@@ -32,9 +35,18 @@ export function BuilderPanel({
 }) {
   const [brickTypeId, setBrickTypeId] = useState(BRICK_TYPES[0]!.id);
   const [colorId, setColorId] = useState(COLORS[0]!.id);
+  const [mode, setMode] = useState<BuilderMode>("build");
   const [selectedBrick, setSelectedBrick] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+
+  // 手势跟踪：单击放置 vs 拖拽环绕 vs 双指缩放
+  const gesture = useRef<{
+    pointers: Map<number, { x: number; y: number }>;
+    downAt: number;
+    moved: boolean;
+    pinchDist: number | null;
+  }>({ pointers: new Map(), downAt: 0, moved: false, pinchDist: null });
 
   const save = snapshot.save;
   const stats = controller.stats();
@@ -45,55 +57,90 @@ export function BuilderPanel({
     if (reason) window.setTimeout(() => setFeedback(null), 2200);
   };
 
-  const onCanvasTap = (nx: number, ny: number) => {
-    const pick = controller.runtime.builderPick(nx, ny);
-    if (pick.kind === "brick") {
-      setSelectedBrick(pick.instanceId);
-      controller.runtime.builderSelect(pick.instanceId);
-      return;
-    }
-    if (pick.kind === "cell") {
-      if (selectedBrick) {
-        const result = controller.builderCommand({
-          type: "moveBrick",
-          instanceId: selectedBrick,
-          position: pick.position,
-        });
-        if (!result.ok) showReason(result.reason);
-        setSelectedBrick(null);
-        controller.runtime.builderSelect(null);
-        return;
-      }
-      const id = nextId();
-      const result = controller.builderCommand({
-        type: "placeBrick",
-        brick: {
-          instanceId: id,
-          brickTypeId,
-          colorId,
-          position: pick.position,
-          rotation: 0,
-        },
-      });
-      if (result.ok) {
-        // 放置后自动选中：可以立刻旋转/移除/移动（儿童操作路径更短）
-        setSelectedBrick(id);
-        controller.runtime.builderSelect(id);
-      } else {
-        showReason(result.reason);
-      }
-      return;
-    }
+  const clearSelection = () => {
     setSelectedBrick(null);
     controller.runtime.builderSelect(null);
+  };
+
+  const onCanvasTap = (nx: number, ny: number) => {
+    const pick = controller.runtime.builderPick(nx, ny);
+    if (mode === "select") {
+      if (pick.kind === "brick") {
+        setSelectedBrick(pick.instanceId);
+        controller.runtime.builderSelect(pick.instanceId);
+      } else {
+        clearSelection();
+      }
+      return;
+    }
+    // 搭建模式：面/格位吸附放置（真实积木连接规则）
+    const position = pick.kind === "brick" ? pick.faceTarget : pick.kind === "cell" ? pick.position : null;
+    if (!position) return;
+    const result = controller.builderCommand({
+      type: "placeBrick",
+      brick: { instanceId: nextId(), brickTypeId, colorId, position, rotation: 0 },
+    });
+    if (!result.ok) showReason(result.reason);
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // 合成事件（测试）或非活动指针：无捕获也能工作
+    }
+    gesture.current.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    gesture.current.downAt = performance.now();
+    gesture.current.moved = false;
+    gesture.current.pinchDist = null;
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const g = gesture.current;
+    const prev = g.pointers.get(e.pointerId);
+    if (!prev) return;
+    const dx = e.clientX - prev.x;
+    const dy = e.clientY - prev.y;
+    g.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (g.pointers.size === 2) {
+      // 双指捏合缩放
+      const [a, b] = [...g.pointers.values()] as [{ x: number; y: number }, { x: number; y: number }];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      if (g.pinchDist !== null && g.pinchDist > 0) {
+        controller.runtime.builderZoom(g.pinchDist / dist);
+      }
+      g.pinchDist = dist;
+      g.moved = true;
+      return;
+    }
+    if (Math.abs(dx) + Math.abs(dy) > 2) g.moved = true;
+    if (g.moved) {
+      controller.runtime.builderOrbit(dx * 0.008, dy * 0.006);
+    }
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const g = gesture.current;
+    const wasTap =
+      g.pointers.size === 1 && !g.moved && performance.now() - g.downAt < TAP_MAX_MS;
+    g.pointers.delete(e.pointerId);
+    g.pinchDist = null;
+    if (g.pointers.size === 0) g.moved = false;
+    if (!wasTap) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    onCanvasTap((e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height);
+  };
+
+  const onWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    controller.runtime.builderZoom(e.deltaY > 0 ? 1.1 : 0.9);
   };
 
   const removeSelected = () => {
     if (!selectedBrick) return;
     const result = controller.builderCommand({ type: "removeBrick", instanceId: selectedBrick });
     showReason(result.ok ? undefined : result.reason);
-    setSelectedBrick(null);
-    controller.runtime.builderSelect(null);
+    clearSelection();
   };
 
   const rotateSelected = () => {
@@ -120,13 +167,11 @@ export function BuilderPanel({
       <div
         className="canvas-tap-layer"
         data-testid="canvas-tap-layer"
-        onPointerDown={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect();
-          onCanvasTap(
-            (e.clientX - rect.left) / rect.width,
-            (e.clientY - rect.top) / rect.height,
-          );
-        }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onWheel={onWheel}
       />
       <header className="topbar">
         <h1>我的赛车</h1>
@@ -139,9 +184,29 @@ export function BuilderPanel({
         <div className="onboarding-hint" data-testid="onboarding-hint">
           {save.onboarding.completedSteps.includes("edited-car")
             ? "改好了就点开始比赛吧！🏁"
-            : "这是你的赛车！点空地放积木，点「开始比赛」赢积分 ⭐"}
+            : "点空地或积木的面放新积木，拖动可以转着看！🏎️"}
         </div>
       )}
+
+      <div className="mode-toggle" data-testid="mode-toggle">
+        <button
+          data-testid="mode-build"
+          className={mode === "build" ? "selected" : ""}
+          onClick={() => {
+            setMode("build");
+            clearSelection();
+          }}
+        >
+          🧱 搭建
+        </button>
+        <button
+          data-testid="mode-select"
+          className={mode === "select" ? "selected" : ""}
+          onClick={() => setMode("select")}
+        >
+          👆 选择
+        </button>
+      </div>
 
       <div className="palette" data-testid="palette">
         <div className="row" role="group" aria-label="积木">
@@ -168,10 +233,12 @@ export function BuilderPanel({
             />
           ))}
         </div>
-        <p className="hint">点车上的空地放积木；点积木可以选中它。</p>
+        <p className="hint">
+          {mode === "build" ? "点空地或积木的面来搭建；拖动旋转视角。" : "点一块积木选中它，可以旋转或拿掉。"}
+        </p>
       </div>
 
-      {selectedBrick && (
+      {mode === "select" && selectedBrick && (
         <div className="selection-actions" data-testid="selection-actions">
           <button data-testid="rotate-brick" onClick={rotateSelected}>转一转</button>
           <button data-testid="remove-brick" onClick={removeSelected}>拿掉</button>
@@ -281,4 +348,3 @@ function Meter({ label, value }: { label: string; value: number }) {
     </div>
   );
 }
-
