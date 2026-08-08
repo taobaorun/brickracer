@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="brickracer 一期 3D 积木赛车网页游戏的技术方案评审：架构、数据流、关键取舍、性能与验收。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23A95035'/%3E%3Crect x='13' y='25' width='38' height='23' rx='5' fill='%23FAF9F5'/%3E%3Ccircle cx='21' cy='50' r='7' fill='%23141413'/%3E%3Ccircle cx='43' cy='50' r='7' fill='%23141413'/%3E%3C/svg%3E">
+<title>brickracer 一期技术方案评审</title>
+<style>
+  :root {
+    --ivory: #FAF9F5;
+    --paper: #FFFFFF;
+    --slate: #141413;
+    --clay: #A95035;
+    --oat: #E3DACC;
+    --olive: #596E41;
+    --rust: #B04A3F;
+    --sky: #6A8CAF;
+    --gray-150: #F0EEE6;
+    --gray-300: #D1CFC5;
+    --gray-500: #66645F;
+    --gray-700: #3D3D3A;
+    --serif: ui-serif, Georgia, "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    color: var(--gray-700);
+    background: var(--ivory);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  button { font: inherit; }
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    border-bottom: 1px solid rgba(209,207,197,.9);
+    background: rgba(250,249,245,.94);
+    backdrop-filter: blur(12px);
+  }
+  .topbar-inner {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 12px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+  }
+  .brand { font: 600 11px/1 var(--mono); letter-spacing: .09em; color: var(--slate); }
+  nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 16px; }
+  nav a { color: var(--gray-500); font: 500 11px/1 var(--mono); text-decoration: none; }
+  nav a:hover { color: var(--clay); }
+  .sheet { max-width: 1120px; margin: 0 auto; padding: 58px 28px 110px; }
+  .hero { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 44px; align-items: start; }
+  .eyebrow { color: var(--gray-500); font: 500 11px/1.4 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+  h1, h2, h3 { color: var(--slate); font-family: var(--serif); font-weight: 500; }
+  h1 { max-width: 720px; margin: 12px 0 16px; font-size: clamp(36px, 5vw, 58px); line-height: 1.04; letter-spacing: -.025em; }
+  h2 { margin: 0 0 14px; font-size: 28px; letter-spacing: -.01em; }
+  h3 { margin: 0 0 8px; font-size: 19px; }
+  .lead { max-width: 730px; margin: 0; color: var(--gray-700); font-size: 17px; }
+  .meta-card, .card, .diagram, .decision, .approval {
+    background: var(--paper);
+    border: 1.5px solid var(--gray-300);
+    border-radius: 14px;
+  }
+  .meta-card { padding: 20px; }
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+    padding: 5px 9px;
+    border: 1px solid rgba(120,140,93,.4);
+    border-radius: 999px;
+    color: #556742;
+    background: rgba(120,140,93,.1);
+    font: 600 11px/1 var(--mono);
+  }
+  .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--olive); }
+  .meta-card dl { margin: 0; display: grid; gap: 12px; }
+  .meta-card dt { color: var(--gray-500); font: 500 10px/1.3 var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+  .meta-card dd { margin: 3px 0 0; color: var(--slate); font-size: 13px; overflow-wrap: anywhere; }
+  .digest { font-family: var(--mono); font-size: 10.5px !important; }
+  .notice { margin-top: 22px; padding: 12px 14px; border-left: 3px solid var(--clay); background: rgba(217,119,87,.08); font-size: 13px; }
+  section { scroll-margin-top: 72px; margin-top: 84px; }
+  .section-head { display: grid; grid-template-columns: 1fr minmax(260px, 430px); gap: 32px; align-items: end; margin-bottom: 24px; }
+  .section-head p { margin: 0; color: var(--gray-500); font-size: 14px; }
+  .pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+  .pill { padding: 6px 9px; border: 1px solid var(--gray-300); border-radius: 999px; background: var(--paper); font: 500 11px/1 var(--mono); }
+  .decision-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 30px; }
+  .decision { padding: 17px; }
+  .decision .num { color: var(--clay); font: 600 11px/1 var(--mono); }
+  .decision h2 { margin: 14px 0 8px; font-size: 18px; }
+  .decision p { margin: 0; font-size: 13px; color: var(--gray-500); }
+  .architecture-layout { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 24px; align-items: start; }
+  .diagram { padding: 24px; overflow-x: auto; }
+  svg.arch { display: block; min-width: 650px; width: 100%; height: auto; }
+  .arch text { font-family: var(--mono); fill: var(--slate); font-size: 11px; pointer-events: none; }
+  .arch .small { fill: var(--gray-500); font-size: 9px; }
+  .arch .node rect { fill: #fff; stroke: var(--gray-300); stroke-width: 1.5; rx: 10; }
+  .arch .node.runtime rect { fill: rgba(217,119,87,.08); stroke: var(--clay); }
+  .arch .node.domain rect { fill: rgba(120,140,93,.09); stroke: var(--olive); }
+  .arch .node.infra rect { fill: rgba(106,140,175,.09); stroke: var(--sky); }
+  .arch .node { cursor: pointer; }
+  .arch .node:hover rect, .arch .node.active rect { stroke-width: 2.5; }
+  .arch .edge { stroke: var(--gray-500); stroke-width: 1.4; fill: none; marker-end: url(#arrow); }
+  .arch .edge.data { stroke: var(--olive); marker-end: url(#arrow-green); }
+  .detail-panel { position: sticky; top: 72px; min-height: 305px; padding: 20px; background: var(--paper); border: 1.5px solid var(--gray-300); border-radius: 14px; }
+  .detail-panel .hint { margin-bottom: 14px; color: var(--gray-500); font: 500 10px/1.4 var(--mono); }
+  .detail-panel .tag { display: inline-block; margin-bottom: 12px; color: var(--clay); font: 600 10px/1 var(--mono); text-transform: uppercase; }
+  .detail-panel p { margin: 0 0 12px; font-size: 13.5px; }
+  .detail-panel code { display: block; padding: 10px 12px; border-radius: 8px; background: var(--gray-150); font: 11px/1.5 var(--mono); white-space: pre-wrap; }
+  .flow { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-top: 26px; }
+  .flow-step { position: relative; min-height: 116px; padding: 16px; border: 1.5px solid var(--gray-300); border-radius: 12px; background: var(--paper); }
+  .flow-step:not(:last-child)::after { content: ""; position: absolute; top: 34px; right: -15px; width: 15px; border-top: 1.5px solid var(--gray-500); }
+  .flow-step .k { color: var(--clay); font: 600 10px/1 var(--mono); }
+  .flow-step b { display: block; margin: 12px 0 5px; color: var(--slate); }
+  .flow-step span { color: var(--gray-500); font-size: 12px; }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .card { padding: 22px; }
+  .card p { margin: 0; font-size: 13.5px; }
+  .check-list { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 10px; }
+  .check-list li { position: relative; padding-left: 20px; font-size: 13px; }
+  .check-list li::before { content: ""; position: absolute; left: 0; top: .54em; width: 8px; height: 8px; border: 1.5px solid var(--olive); border-radius: 2px; background: rgba(120,140,93,.13); }
+  .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .metric { padding: 18px; border-top: 3px solid var(--olive); background: var(--paper); border-right: 1.5px solid var(--gray-300); border-bottom: 1.5px solid var(--gray-300); border-left: 1.5px solid var(--gray-300); border-radius: 12px; }
+  .metric b { display: block; margin-bottom: 5px; color: var(--slate); font: 500 24px/1.1 var(--serif); }
+  .metric span { color: var(--gray-500); font-size: 12px; }
+  .table-wrap { overflow-x: auto; border: 1.5px solid var(--gray-300); border-radius: 14px; background: var(--paper); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 13px 15px; border-bottom: 1px solid var(--gray-300); text-align: left; vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th { color: var(--gray-500); background: var(--gray-150); font: 600 10px/1.3 var(--mono); letter-spacing: .05em; text-transform: uppercase; }
+  td:first-child { color: var(--slate); font-weight: 600; }
+  .chosen { color: var(--olive); }
+  .rejected { color: var(--rust); }
+  .coverage { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .coverage-item { padding: 15px; border: 1px solid var(--gray-300); border-radius: 10px; background: var(--paper); }
+  .coverage-item b { color: var(--clay); font: 600 11px/1 var(--mono); }
+  .coverage-item p { margin: 8px 0 0; font-size: 12.5px; }
+  .approval { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 30px; align-items: center; padding: 28px; border-color: var(--oat); background: linear-gradient(135deg, #fff, rgba(227,218,204,.28)); }
+  .approval p { max-width: 700px; margin: 0; }
+  .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+  .btn { appearance: none; cursor: pointer; padding: 10px 14px; border: 1.5px solid var(--gray-300); border-radius: 8px; color: var(--slate); background: var(--paper); font: 600 11px/1 var(--mono); }
+  .btn:hover { border-color: var(--clay); }
+  .btn.primary { border-color: var(--clay); color: #fff; background: var(--clay); }
+  .copy-state { min-height: 20px; margin-top: 10px; color: var(--olive); font: 600 11px/1.4 var(--mono); }
+  .canonical { margin-top: 24px; color: var(--gray-500); font-size: 12px; }
+  @media (max-width: 920px) {
+    .hero, .section-head, .architecture-layout, .approval { grid-template-columns: 1fr; }
+    .decision-grid, .metric-grid { grid-template-columns: repeat(2, 1fr); }
+    .detail-panel { position: static; }
+    .flow { grid-template-columns: repeat(3, 1fr); }
+    .flow-step:nth-child(3)::after { display: none; }
+    .actions { justify-content: flex-start; }
+  }
+  @media (max-width: 640px) {
+    .topbar-inner, .sheet { padding-left: 18px; padding-right: 18px; }
+    nav { display: none; }
+    .decision-grid, .metric-grid, .coverage, .split, .flow { grid-template-columns: 1fr; }
+    .flow-step::after { display: none !important; }
+    section { margin-top: 64px; }
+  }
+  @media print {
+    .topbar, .actions, .copy-state { display: none !important; }
+    body { background: #fff; }
+    .sheet { max-width: none; padding: 20px; }
+    section { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">BRICKRACER / DESIGN REVIEW</div>
+    <nav aria-label="页面导航">
+      <a href="#overview">总览</a>
+      <a href="#architecture">架构</a>
+      <a href="#flow">流程</a>
+      <a href="#tradeoffs">取舍</a>
+      <a href="#verification">验证</a>
+      <a href="#decision">确认</a>
+    </nav>
+  </div>
+</div>
+
+<main class="sheet">
+  <section id="overview" style="margin-top:0">
+    <div class="hero">
+      <div>
+        <div class="eyebrow">brickracer · phase 1 · technical solution</div>
+        <h1>让积木创作与实时竞速共用一套可信规则</h1>
+        <p class="lead">推荐方案是纯客户端静态网页：React 管理儿童可理解的界面流程，独立的 Three.js + Rapier 运行时负责每帧渲染与物理，纯领域模块统一约束玩家搭建、AI 生成、积分和存档。</p>
+        <div class="pill-row">
+          <span class="pill">React UI shell</span>
+          <span class="pill">Three.js WebGL2</span>
+          <span class="pill">Rapier WASM</span>
+          <span class="pill">Web Audio</span>
+          <span class="pill">localStorage V1</span>
+          <span class="pill">Playwright</span>
+        </div>
+        <div class="notice"><strong>核心取舍：</strong>赛车在物理上是一个聚合底盘，而不是每块积木一个刚体。普通积木仍影响受控的重量与重心；碰撞飞散只影响视觉，因此手机性能、比赛公平和赛后自动复原可以同时成立。</div>
+      </div>
+      <aside class="meta-card">
+        <div class="status">文档审查已通过</div>
+        <dl>
+          <div><dt>Design</dt><dd>brickracer-mvp-design / 1.0</dd></div>
+          <div><dt>Coverage</dt><dd>R1–R11</dd></div>
+          <div><dt>Source of truth</dt><dd>design.md</dd></div>
+          <div><dt>Content digest</dt><dd class="digest">7bb26173ece5b4b864134a743d391eb9c8f329d21d8e695e1019268dcaf728a7</dd></div>
+          <div><dt>Next gate</dt><dd>设计负责人确认后生成实施计划</dd></div>
+        </dl>
+      </aside>
+    </div>
+
+    <div class="decision-grid">
+      <article class="decision"><span class="num">01</span><h2>低频 UI / 高频游戏分离</h2><p>React 不持有逐帧物理状态；运行时只发布节流 HUD 快照和无丢失结果事件。</p></article>
+      <article class="decision"><span class="num">02</span><h2>一份蓝图，四处复用</h2><p>同一验证器服务玩家搭建、AI 生成、存档加载和比赛入口，避免规则漂移。</p></article>
+      <article class="decision"><span class="num">03</span><h2>静态客户端，无后端</h2><p>账号、云同步和远程经济不进入一期；发布物可以由静态托管完整提供。</p></article>
+      <article class="decision"><span class="num">04</span><h2>体验证据不能只靠自动化</h2><p>真实手机负责 GPU、触控和音频；8–12 岁儿童观察测试负责独立可玩性。</p></article>
+    </div>
+  </section>
+
+  <section id="architecture">
+    <div class="section-head">
+      <div><div class="eyebrow">System boundaries</div><h2>架构与权威边界</h2></div>
+      <p>点击图中模块查看责任。绿色模块持有可测试的纯规则；橙色模块持有实时资源；蓝色模块处理浏览器边界。</p>
+    </div>
+    <div class="architecture-layout">
+      <div class="diagram">
+        <svg class="arch" viewBox="0 0 720 500" role="img" aria-label="brickracer 模块架构图">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#87867F"/></marker>
+            <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#788C5D"/></marker>
+          </defs>
+          <path class="edge" d="M170 84 L265 84"/>
+          <path class="edge" d="M455 84 L550 84"/>
+          <path class="edge data" d="M360 122 L360 174"/>
+          <path class="edge data" d="M360 244 L360 294"/>
+          <path class="edge" d="M265 331 L170 331"/>
+          <path class="edge" d="M455 331 L550 331"/>
+          <path class="edge" d="M620 122 C620 210 620 230 455 210"/>
+          <path class="edge" d="M100 122 C100 210 100 230 265 210"/>
+          <path class="edge data" d="M360 366 L360 414"/>
+
+          <g class="node infra" data-key="input"><rect x="30" y="46" width="140" height="76"/><text x="100" y="75" text-anchor="middle">Input adapters</text><text class="small" x="100" y="95" text-anchor="middle">keyboard · touch · pointer</text></g>
+          <g class="node" data-key="app"><rect x="265" y="46" width="190" height="76"/><text x="360" y="74" text-anchor="middle">React + AppController</text><text class="small" x="360" y="94" text-anchor="middle">builder · race · results · shop</text></g>
+          <g class="node infra" data-key="save"><rect x="550" y="46" width="140" height="76"/><text x="620" y="75" text-anchor="middle">Persistence</text><text class="small" x="620" y="95" text-anchor="middle">validate · revision · backup</text></g>
+          <g class="node domain" data-key="domain"><rect x="265" y="174" width="190" height="70"/><text x="360" y="202" text-anchor="middle">Pure domain rules</text><text class="small" x="360" y="222" text-anchor="middle">blueprint · race · progression</text></g>
+          <g class="node infra" data-key="assets"><rect x="30" y="294" width="140" height="74"/><text x="100" y="323" text-anchor="middle">Asset loader</text><text class="small" x="100" y="343" text-anchor="middle">chunks · WASM · licensed audio</text></g>
+          <g class="node runtime" data-key="runtime"><rect x="265" y="294" width="190" height="72"/><text x="360" y="322" text-anchor="middle">GameRuntime</text><text class="small" x="360" y="342" text-anchor="middle">fixed step · snapshots · events</text></g>
+          <g class="node runtime" data-key="audio"><rect x="550" y="294" width="140" height="74"/><text x="620" y="323" text-anchor="middle">Audio engine</text><text class="small" x="620" y="343" text-anchor="middle">gesture · loops · mute</text></g>
+          <g class="node runtime" data-key="render"><rect x="180" y="414" width="160" height="62"/><text x="260" y="440" text-anchor="middle">Three.js renderer</text><text class="small" x="260" y="458" text-anchor="middle">instanced bricks · fragments</text></g>
+          <g class="node runtime" data-key="physics"><rect x="380" y="414" width="160" height="62"/><text x="460" y="440" text-anchor="middle">Rapier physics</text><text class="small" x="460" y="458" text-anchor="middle">aggregate chassis · ray wheels</text></g>
+        </svg>
+      </div>
+      <aside class="detail-panel" id="detailPanel">
+        <div class="hint">选择左侧模块查看边界</div>
+        <span class="tag" id="detailTag">application</span>
+        <h3 id="detailTitle">React + AppController</h3>
+        <p id="detailBody">持有低频页面状态和完整产品流程。它发送领域命令、呈现不可变快照，但不拥有 Three.js、Rapier 或每帧车辆状态。</p>
+        <code id="detailCode">boot → builder → race → results → shop</code>
+      </aside>
+    </div>
+  </section>
+
+  <section id="flow">
+    <div class="section-head">
+      <div><div class="eyebrow">Player lifecycle</div><h2>核心闭环如何穿过系统</h2></div>
+      <p>每个跨界点都有一个明确权威：验证器决定能否参赛，比赛事实决定奖励，持久化事务决定能否写入。</p>
+    </div>
+    <div class="flow">
+      <div class="flow-step"><span class="k">01</span><b>搭建</b><span>触控/鼠标转换为网格命令</span></div>
+      <div class="flow-step"><span class="k">02</span><b>验证</b><span>连接、重叠、功能槽与范围</span></div>
+      <div class="flow-step"><span class="k">03</span><b>编译车辆</b><span>蓝图生成渲染实例与聚合物理</span></div>
+      <div class="flow-step"><span class="k">04</span><b>实时比赛</b><span>60 Hz 固定物理，30–60 Hz 呈现</span></div>
+      <div class="flow-step"><span class="k">05</span><b>一次结算</b><span>无丢失事件携带不可变比赛事实</span></div>
+      <div class="flow-step"><span class="k">06</span><b>永久成长</b><span>积分、解锁与新蓝图原子保存</span></div>
+    </div>
+
+    <div class="split" style="margin-top:20px">
+      <article class="card">
+        <h3>搭建合法性</h3>
+        <p>积木坐标是整数网格；连接图从不可拆底盘向外遍历。功能件只能安装到命名槽位。玩家、AI 和存档都不能绕过同一验证器。</p>
+        <ul class="check-list"><li>非法命令不改变权威蓝图</li><li>比赛使用不可变蓝图快照</li><li>积木质量与重心影响被约束</li></ul>
+      </article>
+      <article class="card">
+        <h3>碰撞与复原</h3>
+        <p>强碰撞隐藏部分装饰实例并生成短暂碎片；碎片不属于车辆碰撞组，也不进入积分和存档。离开比赛时所有实例复原。</p>
+        <ul class="check-list"><li>核心件永不成为碎片候选</li><li>权威质量和性能保持不变</li><li>碎片池有硬上限并统一释放</li></ul>
+      </article>
+    </div>
+  </section>
+
+  <section id="tradeoffs">
+    <div class="section-head">
+      <div><div class="eyebrow">Decisions &amp; tradeoffs</div><h2>为什么选择这条路线</h2></div>
+      <p>方案优先保护一期的辨识度、移动端性能和可验证性；不是为未来多人或无限内容预建平台。</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>维度</th><th>采用</th><th>未采用</th><th>主要原因</th></tr></thead>
+        <tbody>
+          <tr><td>3D 所有权</td><td class="chosen">独立 Three.js GameRuntime</td><td class="rejected">React Three Fiber 全场景</td><td>让固定步物理与实例数据不受 React 重渲染生命周期影响。</td></tr>
+          <tr><td>车辆物理</td><td class="chosen">Rapier 动态刚体 + 射线车轮</td><td class="rejected">自制运动学移动</td><td>保留碰撞、质量、抓地与悬挂，同时可通过参数实现街机容错。</td></tr>
+          <tr><td>积木物理</td><td class="chosen">单聚合车辆 + 视觉碎片</td><td class="rejected">逐积木刚体和关节</td><td>降低移动端 bodies/contact 成本，并满足视觉脱落不改性能。</td></tr>
+          <tr><td>持久化</td><td class="chosen">版本化 localStorage</td><td class="rejected">IndexedDB / 后端</td><td>一期数据很小；事件式写入、备份与版本冲突保护足够。</td></tr>
+          <tr><td>渲染基线</td><td class="chosen">WebGL2</td><td class="rejected">WebGPU-first</td><td>覆盖当前目标浏览器，不为同一场景维护额外回退路径。</td></tr>
+          <tr><td>音频</td><td class="chosen">授权循环 + Web Audio 动态混音</td><td class="rejected">纯合成引擎声</td><td>更接近可识别的发动机声浪，同时保留速度/油门联动。</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="verification">
+    <div class="section-head">
+      <div><div class="eyebrow">Evidence contract</div><h2>性能、恢复与验收</h2></div>
+      <p>自动化证明规则和跨浏览器行为；物理手机与目标儿童负责自动化不能代替的证据。</p>
+    </div>
+    <div class="metric-grid">
+      <div class="metric"><b>≤16.7 ms</b><span>桌面完整比赛 p95 帧时间目标</span></div>
+      <div class="metric"><b>≤33.3 ms</b><span>中端触屏手机完整比赛 p95 要求</span></div>
+      <div class="metric"><b>≤8 s</b><span>10 Mbps / 100 ms 冷启动至可交互搭建</span></div>
+      <div class="metric"><b>0 次</b><span>奖励重复、负积分或陈旧标签页静默覆盖</span></div>
+    </div>
+
+    <div class="coverage" style="margin-top:20px">
+      <div class="coverage-item"><b>R1</b><p>桌面/触控浏览器闭环、真实 iOS/Android、冷启动与帧时间。</p></div>
+      <div class="coverage-item"><b>R2–R4</b><p>蓝图属性测试、搭建 E2E、控制车辆对照实验。</p></div>
+      <div class="coverage-item"><b>R5–R6</b><p>固定步车辆、复位、AI 合法性/评级分布与完整比赛。</p></div>
+      <div class="coverage-item"><b>R7–R8</b><p>音频解锁/静音、真人听测、碎片不改属性和赛后复原。</p></div>
+      <div class="coverage-item"><b>R9–R10</b><p>积分不变量、购买闭环、损坏/配额/多标签存档恢复。</p></div>
+      <div class="coverage-item"><b>R11</b><p>8–12 岁儿童无需外部说明完成完整闭环；必须由人类验收。</p></div>
+    </div>
+
+    <div class="split" style="margin-top:20px">
+      <article class="card"><h3>失败恢复</h3><ul class="check-list"><li>WebGL/WASM/资源失败可释放后重试</li><li>比赛致命错误放弃未提交结果，不扣积分</li><li>无效存档回退备份或安全默认</li><li>旧标签页写入被拒绝并重载最新进度</li></ul></article>
+      <article class="card"><h3>明确延期</h3><ul class="check-list"><li>多人、排行榜、分享和用户内容</li><li>账号、云存档与跨设备同步</li><li>更多赛道、赛道编辑和 PWA 离线</li><li>分析平台、后台与商业化能力</li></ul></article>
+    </div>
+  </section>
+
+  <section id="decision">
+    <div class="approval">
+      <div>
+        <div class="eyebrow">Design authority decision</div>
+        <h2 style="margin-top:8px">确认这套技术方案，或指出要改的地方</h2>
+        <p>确认后，设计状态会更新为已接受，并据此生成带依赖顺序、验证义务和恢复边界的实施计划。本页是评审视图；语义真源仍是同摘要的 <code>design.md</code>。</p>
+        <div class="copy-state" id="copyState" aria-live="polite"></div>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="copyApproval">复制确认语句</button>
+        <button class="btn" id="copyQuestions">复制反馈模板</button>
+        <button class="btn" onclick="window.print()">打印 / 存为 PDF</button>
+      </div>
+    </div>
+    <p class="canonical">Canonical source: <a href="design.md">docs/deliveries/brickracer-mvp/design.md</a> · Review: <a href="design-review.md">design-review.md</a></p>
+  </section>
+</main>
+
+<script>
+const DETAILS = {
+  input: { tag: "browser boundary", title: "Input adapters", body: "将键盘、鼠标、Pointer Events 与触控转换为统一的搭建命令或 steer / throttle / brake 动作。领域规则不按设备分叉。", code: "device events → normalized commands" },
+  app: { tag: "application", title: "React + AppController", body: "持有低频页面状态和完整产品流程。它发送领域命令、呈现不可变快照，但不拥有 Three.js、Rapier 或每帧车辆状态。", code: "boot → builder → race → results → shop" },
+  save: { tag: "browser boundary", title: "Persistence", body: "验证版本化 JSON，以主/备份键保存。每次事务比较 revision；另一个标签页更新后，旧写入会被拒绝。", code: "validate → compare revision → backup → commit" },
+  domain: { tag: "authority", title: "Pure domain rules", body: "蓝图合法性、车辆属性、比赛圈数/名次、积分与购买都在纯 TypeScript 规则中。玩家、AI、存档和测试共享它们。", code: "blueprint + catalog → validated stats" },
+  assets: { tag: "browser boundary", title: "Asset loader", body: "先显示轻量 UI shell，再加载 3D/WASM；音频在用户手势后按需解码。所有生产资源同源、带 hash 且可整包回滚。", code: "shell → runtime chunk → WASM → race assets" },
+  runtime: { tag: "real-time owner", title: "GameRuntime", body: "唯一拥有 requestAnimationFrame、固定步累积器和当前游戏模式。HUD 用节流快照；比赛完成和错误走无丢失事件。", code: "60 Hz physics + interpolated render" },
+  audio: { tag: "real-time owner", title: "Audio engine", body: "用户手势后解锁 Web Audio，根据平滑的油门/速度遥测混合授权发动机循环，并持久化音量和静音。", code: "telemetry → crossfade / pitch → master gain" },
+  render: { tag: "real-time owner", title: "Three.js renderer", body: "积木通过共享几何、材质和 InstancedMesh 批量绘制；质量档只降低表现成本，不改变物理或规则。", code: "blueprint → instance transforms → WebGL2" },
+  physics: { tag: "real-time owner", title: "Rapier physics", body: "每辆赛车是一个聚合动态底盘，车轮通过射线控制器接地。积木质量和重心受控影响车辆，视觉碎片不参与权威物理。", code: "input → forces / steering / brake → telemetry" }
+};
+const nodes = document.querySelectorAll('.arch .node');
+const tag = document.getElementById('detailTag');
+const title = document.getElementById('detailTitle');
+const body = document.getElementById('detailBody');
+const code = document.getElementById('detailCode');
+function selectNode(node) {
+  nodes.forEach(n => n.classList.remove('active'));
+  node.classList.add('active');
+  const d = DETAILS[node.dataset.key];
+  tag.textContent = d.tag;
+  title.textContent = d.title;
+  body.textContent = d.body;
+  code.textContent = d.code;
+}
+nodes.forEach(node => node.addEventListener('click', () => selectNode(node)));
+selectNode(document.querySelector('.arch .node[data-key="app"]'));
+
+async function copyText(text, ok) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (_) {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand('copy');
+    area.remove();
+  }
+  document.getElementById('copyState').textContent = ok;
+}
+document.getElementById('copyApproval').addEventListener('click', () => copyText(
+  '我确认接受 brickracer-mvp-design v1.0（content digest: 7bb26173ece5b4b864134a743d391eb9c8f329d21d8e695e1019268dcaf728a7）。请继续生成实施计划。',
+  '确认语句已复制，可以直接粘贴回对话。'
+));
+document.getElementById('copyQuestions').addEventListener('click', () => copyText(
+  '我对 brickracer-mvp-design v1.0 有以下反馈：\n1. 希望修改：\n2. 原因或期望结果：\n3. 其余部分是否接受：',
+  '反馈模板已复制。'
+));
+</script>
+</body>
+</html>
