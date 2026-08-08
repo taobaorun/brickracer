@@ -30,10 +30,20 @@ button.selected { outline: 3px solid #2e6fd2; }
 .builder-ui > * { pointer-events: auto; }
 .canvas-tap-layer {
   position: absolute; inset: 0; z-index: 5; pointer-events: auto;
+  touch-action: none; /* 拖拽环绕/捏合缩放接管触控手势 */
 }
 .builder-ui .topbar { position: relative; z-index: 11; }
 .builder-ui .palette, .builder-ui .slots, .builder-ui .stats,
-.builder-ui .selection-actions, .builder-ui .primary.big { z-index: 11; }
+.builder-ui .selection-actions, .builder-ui .mode-toggle, .builder-ui .primary.big { z-index: 11; }
+
+.mode-toggle {
+  position: absolute; left: 50%; top: 116px; transform: translateX(-50%);
+  display: flex; gap: 8px;
+}
+@media (max-width: 600px) {
+  .mode-toggle { top: 168px; } /* 竖屏手机：提示条换行后避让 */
+}
+.mode-toggle button { font-size: 17px; padding: 10px 18px; }
 
 .topbar {
   display: flex; gap: 10px; align-items: center; padding: 10px 14px;
